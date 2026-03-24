@@ -1,62 +1,107 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import datetime
+import numpy as np
 
 # --- PENGATURAN TAMPILAN WEB ---
-st.set_page_config(page_title="AI Crypto Analyzer", layout="wide")
-st.title("🤖 AI Dashboard: Analisa BTC Otomatis")
-st.write("Aplikasi ini otomatis menarik data harga Bitcoin dan memberikan sinyal teknikal dasar.")
+st.set_page_config(page_title="Pro Crypto AI", layout="wide")
+st.title("⚡ AI Crypto Pro: Multi-Timeframe")
+st.write("Pilih gaya tradingmu di bawah ini, AI akan otomatis menyesuaikan analisa pasar.")
 
-# --- FUNGSI MENGAMBIL DATA HARGA ---
-@st.cache_data(ttl=300) # Data di-refresh otomatis setiap 5 menit
-def load_data():
+# --- PILIHAN TIMEFRAME DARI USER ---
+pilihan_tf = st.selectbox(
+    "Pilih Mode Trading (Timeframe):",
+    (
+        "⚡ Scalping Super Cepat (1 Menit)", 
+        "🏃 Scalping Normal (5 Menit)", 
+        "🚶 Day Trading (15 Menit)", 
+        "⏱️ Day Trading Santai (1 Jam)", 
+        "📅 Swing Trading (1 Hari)"
+    )
+)
+
+# Menentukan parameter Yahoo Finance berdasarkan pilihan user
+if pilihan_tf == "⚡ Scalping Super Cepat (1 Menit)":
+    interval_yf = "1m"
+    period_yf = "1d" # yfinance cuma bisa narik 1m maksimal 7 hari terakhir
+elif pilihan_tf == "🏃 Scalping Normal (5 Menit)":
+    interval_yf = "5m"
+    period_yf = "5d"
+elif pilihan_tf == "🚶 Day Trading (15 Menit)":
+    interval_yf = "15m"
+    period_yf = "5d"
+elif pilihan_tf == "⏱️ Day Trading Santai (1 Jam)":
+    interval_yf = "1h"
+    period_yf = "1mo"
+else:
+    interval_yf = "1d"
+    period_yf = "6mo"
+
+# --- FUNGSI MENGAMBIL DATA ---
+@st.cache_data(ttl=60) # Refresh tiap 60 detik
+def load_data(interval, period):
     btc = yf.Ticker("BTC-USD")
-    # Ambil data 60 hari terakhir
-    df = btc.history(period="60d")
+    df = btc.history(period=period, interval=interval)
     return df
 
-# --- FUNGSI ANALISA TEKNIKAL & SINYAL ---
+# --- FUNGSI ANALISA TEKNIKAL ---
 def analyze_data(df):
-    # Menghitung Simple Moving Average (SMA)
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    # EMA 9 & 21
+    df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
+    df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
     
-    # Menentukan Sinyal Jual/Beli (Strategi Crossover sederhana)
+    # RSI 14
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
     last_close = df['Close'].iloc[-1]
-    last_sma20 = df['SMA_20'].iloc[-1]
-    last_sma50 = df['SMA_50'].iloc[-1]
+    last_ema9 = df['EMA_9'].iloc[-1]
+    last_ema21 = df['EMA_21'].iloc[-1]
+    last_rsi = df['RSI'].iloc[-1]
     
-    if last_sma20 > last_sma50 and last_close > last_sma20:
-        signal = "🟢 BELI (Uptrend)"
-    elif last_sma20 < last_sma50 and last_close < last_sma20:
-        signal = "🔴 JUAL (Downtrend)"
+    # Logika Sinyal
+    if last_rsi >= 70:
+        signal = "⚠️ JENUH BELI (Siap-siap Take Profit / Jual)"
+    elif last_rsi <= 30:
+        signal = "⚠️ JENUH JUAL (Potensi Pantulan Naik / Beli)"
+    elif last_ema9 > last_ema21:
+        signal = "🟢 TREN NAIK (Fokus Cari Beli)"
+    elif last_ema9 < last_ema21:
+        signal = "🔴 TREN TURUN (Fokus Cari Jual)"
     else:
-        signal = "🟡 TAHAN (Sideways / Konsolidasi)"
+        signal = "🟡 KONSOLIDASI (Tunggu Konfirmasi)"
         
-    return last_close, signal, df
+    return last_close, signal, last_rsi, df
 
 # --- PROSES & TAMPILKAN DI WEB ---
 try:
-    with st.spinner('Menganalisa pasar...'):
-        data = load_data()
-        current_price, trading_signal, processed_data = analyze_data(data)
+    with st.spinner(f'Menarik data {pilihan_tf}...'):
+        data = load_data(interval_yf, period_yf)
         
-        # Tampilkan Harga dan Sinyal
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(label="Harga BTC Saat Ini (USD)", value=f"${current_price:,.2f}")
-        with col2:
-            st.subheader("Sinyal AI Saat Ini:")
-            st.title(trading_signal)
+        if data.empty:
+            st.error("Gagal menarik data dari server. Coba beberapa saat lagi.")
+        else:
+            current_price, trading_signal, current_rsi, processed_data = analyze_data(data)
             
-        st.markdown("---")
-        
-        # Tampilkan Grafik Harga
-        st.subheader("Grafik Pergerakan Harga (Dengan SMA 20 & 50)")
-        st.line_chart(processed_data[['Close', 'SMA_20', 'SMA_50']])
-        
+            # Tampilkan Angka
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(label="Harga BTC (USD)", value=f"${current_price:,.2f}")
+            with col2:
+                st.metric(label="RSI (Kekuatan)", value=f"{current_rsi:.2f}", delta=">70 Overbought | <30 Oversold", delta_color="off")
+            with col3:
+                st.subheader(f"Sinyal {interval_yf}:")
+                st.write(f"**{trading_signal}**")
+                
+            st.markdown("---")
+            
+            # Tampilkan Grafik
+            st.subheader(f"Grafik Pergerakan Harga ({pilihan_tf})")
+            # Menampilkan 100 data terakhir agar grafik tidak terlalu padat
+            st.line_chart(processed_data[['Close', 'EMA_9', 'EMA_21']].tail(100))
+            
 except Exception as e:
-    st.error(f"Gagal mengambil data: {e}")
-
-st.caption("Peringatan: Ini adalah analisa teknikal dasar. Trading kripto memiliki risiko tinggi.")
+    st.error(f"Terjadi kesalahan: {e}")
