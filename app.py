@@ -7,7 +7,7 @@ import google.generativeai as genai
 # --- KUNCI OTAK AI ---
 GOOGLE_API_KEY = "AIzaSyB4n5rDd0HTwMMFNPw5Vq--3aVMXDBNf9E"
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 st.set_page_config(page_title="AI Trading Commander", layout="wide")
 st.title("🤖 AI Commander: Keputusan Trading Otomatis")
